@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+from sqlalchemy import text, extract
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date, timedelta
@@ -26,11 +26,11 @@ def healthchecker(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Error connecting to the database")
 
 @app.post("/contacts/", response_model=ContactResponse)
-async def create_contact(contact: ContactCreateUpdate, db: Session = Depends(get_db)):
+def create_contact(contact: ContactCreateUpdate, db: Session = Depends(get_db)):
     db_contact = Contacts(**contact.dict())
     db.add(db_contact)
-    await db.commit()
-    await db.refresh(db_contact)
+    db.commit()
+    db.refresh(db_contact)
     return db_contact
 
 @app.get("/contacts/", response_model=List[ContactResponse])
@@ -52,14 +52,14 @@ def get_contact(contact_id: int, db: Session = Depends(get_db)):
     return contact
 
 @app.put("/contacts/{contact_id}", response_model=ContactResponse)
-async def update_contact(contact_id: int, contact: ContactCreateUpdate, db: Session = Depends(get_db)):
+def update_contact(contact_id: int, contact: ContactCreateUpdate, db: Session = Depends(get_db)):
     db_contact = db.query(Contacts).filter(Contacts.id == contact_id).first()
     if db_contact is None:
         raise HTTPException(status_code=404, detail="Contact not found")
     for key, value in contact.dict().items():
         setattr(db_contact, key, value)
-    await db.commit()
-    await db.refresh(db_contact)
+    db.commit()
+    db.refresh(db_contact)
     return db_contact
 
 @app.delete("/contacts/{contact_id}")
@@ -71,13 +71,13 @@ def delete_contact(contact_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Contact deleted successfully"}
 
-@app.get("/contacts/birthdays", response_model=List[ContactResponse])
-def get_birthdays(db: Session = Depends(get_db)):
+@app.get("/contacts/birthdays/next-week", response_model=List[ContactResponse])
+def get_birthdays_next_week(db: Session = Depends(get_db)):
     today = date.today()
     next_week = today + timedelta(days=7)
     contacts = db.query(Contacts).filter(
-        func.extract('day', Contacts.birthday) >= today.day,
-        func.extract('day', Contacts.birthday) <= next_week.day,
-        func.extract('month', Contacts.birthday) == today.month
+        extract('month', Contacts.birthday) == today.month,
+        extract('day', Contacts.birthday) >= today.day,
+        extract('day', Contacts.birthday) <= next_week.day
     ).all()
     return contacts
