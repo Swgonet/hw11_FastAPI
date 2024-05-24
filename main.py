@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, extract
 from sqlalchemy.orm import Session
@@ -6,10 +6,11 @@ from typing import List, Optional
 from datetime import date, timedelta
 from sqlalchemy import func
 
-from db import get_db
+from auth import auth_service
+from src.database.db import get_db
 
-from models import Contacts
-from schemas import ContactResponse, ContactCreateUpdate
+from src.database.models import Contacts, User
+from schemas import ContactResponse, ContactCreateUpdate, UserCreate, Token
 
 
 app = FastAPI()
@@ -81,3 +82,22 @@ def get_birthdays_next_week(db: Session = Depends(get_db)):
         extract('day', Contacts.birthday) <= next_week.day
     ).all()
     return contacts
+
+@app.post("/signup/", response_model=Token, tags=['login'])
+def sign_up(user: UserCreate, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.email == user.email).first()
+    if db_user:
+        raise HTTPException(status_code=409, detail="User with this email already exists")
+    new_user = auth_service.register_new_user(db, user)
+    if not new_user:
+        raise HTTPException(status_code=500, detail="Failed to create user")
+    access_token, refresh_token = auth_service.create_access_and_refresh_tokens(new_user)
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
+@app.post("/login/", response_model=Token, tags=['login'])
+def login(user: UserCreate, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.email == user.email).first()
+    if not db_user or not auth_service.verify_password(user.password, db_user.hashed_password):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    access_token, refresh_token = auth_service.create_access_and_refresh_tokens(db_user)
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
